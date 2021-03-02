@@ -14,7 +14,6 @@ from math import cos, sin, pi
 import gym
 import matplotlib.pyplot as plt
 import numpy as np
-# import tensorflow as tf
 from numpy import logical_and
 from gym.utils import seeding
 
@@ -147,18 +146,11 @@ class CrossroadEnd2end3way(gym.Env):
         all_info = self._get_all_info(ego_dynamics)
         self.obs = self._get_obs()
         self.done_type, done = self._judge_done()
-        # reward, self.reward_info = self.compute_reward2(self.obs, self.action)
         self.reward_info.update({'final_rew': reward})
-        # if done:
-        #     print(self.done_type)
         cost_hazards = 0.0
         cost = 0.0
         real_dist = 0.0
         real_dist_road = 0.0
-        # if self.reward_info['veh2veh4training'] > 0.0 and self.cost_mode == 'pointwise':
-        #     cost = 1.0
-        # if self.reward_info['barrier4training'] > 0.0 and self.cost_mode == 'barrier':
-        #     cost = 1.0
         if self.reward_info['veh2veh4real'] > 0.0:
             cost = 1.0
             real_dist = self.reward_info['veh2veh4real']
