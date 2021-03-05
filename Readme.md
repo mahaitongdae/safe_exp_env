@@ -6,7 +6,3 @@ An [OpenAI safety-gym third-party environment](https://openai.com/blog/safety-gy
 - Ubuntu 16.04 or 18.04
 - SUMO <= 1.7.0
 - [safety-gym environment](https://github.com/openai/safety-gym)
-
-# Description
-We provide environments for autunomous driving decision and control in the intersection. A vector observation including ego states, tracking error and surronding states is provided.
-
