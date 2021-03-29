@@ -1,6 +1,8 @@
 # Safe Exploration Env
 
+Code for paper [Model-based Constrained Reinforcement Learning using Generalized Control Barrier Function](https://arxiv.org/abs/2103.01556) submitted to 2021 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS 2021).
 An [OpenAI safety-gym third-party environment](https://openai.com/blog/safety-gym/) with [SUMO](https://www.eclipse.org/sumo/). 
+
 
 ## This repo is **modified** from the [original version](https://github.com/idthanm/env_build).
 
