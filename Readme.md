@@ -10,7 +10,7 @@ An [OpenAI safety-gym third-party environment](https://openai.com/blog/safety-gy
 - [safety-gym environment](https://github.com/openai/safety-gym)
 
 ## Related Repos and Papers
-- [Integrated decision and control scheme for autonomous driving](https://arxiv.org/abs/2103.10290)
+- [Integrated decision and control scheme for autonomous driving](https://arxiv.org/abs/2103.10290)\\
 This paper provides a integrated decision and control scheme for autonomous vehicles, and provides the major supporting techniques for the real vehicle experiment in this paper.
 ```
 @misc{guan2021integrated,
