@@ -1,4 +1,4 @@
-# Safe Exploration env
+# Safe Exploration Env
 
 An [OpenAI safety-gym third-party environment](https://openai.com/blog/safety-gym/) with [SUMO](https://www.eclipse.org/sumo/). 
 
