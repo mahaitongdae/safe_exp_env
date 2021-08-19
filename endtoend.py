@@ -135,6 +135,7 @@ class CrossroadEnd2end3way(gym.Env):
         del self.traffic
 
     def step(self, action):
+        obs_t = self.obs
         if len(action.shape) == 2:
             action = action.reshape([-1,])
         self.action = self._action_transformation_for_end2end(action)
@@ -147,19 +148,9 @@ class CrossroadEnd2end3way(gym.Env):
         self.obs = self._get_obs()
         self.done_type, done = self._judge_done()
         self.reward_info.update({'final_rew': reward})
-        cost_hazards = 0.0
-        cost = 0.0
-        real_dist = 0.0
-        real_dist_road = 0.0
-        if self.reward_info['veh2veh4real'] > 0.0:
-            cost = 1.0
-            real_dist = self.reward_info['veh2veh4real']
-        if self.reward_info['veh2road4training'] > 0.0:
-            cost = 1.0
-        if self.reward_info['veh2road4real'] > 0.0:
-            real_dist_road = self.reward_info['veh2road4real']
+        delta_phi, cost = self.compute_delta_phi(obs_t, self.obs)
         all_info.update({'reward_info': self.reward_info, 'ref_index': self.ref_path.ref_index})
-        info = dict(cost_hazards=cost, cost=cost, real_dist = real_dist, real_dist_road=real_dist_road)
+        info = dict(cost=cost, delta_phi = delta_phi)
         return self.obs, reward, done, info
 
     def _set_observation_space(self, observation):
@@ -534,7 +525,7 @@ class CrossroadEnd2end3way(gym.Env):
                              ))
 
     def compute_reward(self, obs, action):
-        obs = self.convert_vehs_to_abso(obs)
+        # obs = self.convert_vehs_to_abso(obs)
         ego_infos, tracking_infos, veh_infos = obs[:self.ego_info_dim], obs[self.ego_info_dim:self.ego_info_dim + self.per_tracking_info_dim * (self.num_future_data+1)], \
                                                obs[self.ego_info_dim + self.per_tracking_info_dim * (self.num_future_data+1):]
         steers, a_xs = action[0], action[1]
@@ -551,113 +542,6 @@ class CrossroadEnd2end3way(gym.Env):
         devi_phi = -np.square(tracking_infos[1] * np.pi / 180.)
         devi_v = -np.square(tracking_infos[2])
 
-        veh2veh4training = 0.0
-        veh2veh4real = 0.0
-        barrier4training = 0.0
-        ego_lws = (L - W) / 2.
-
-        ego_front_points = ego_infos[3] + ego_lws * np.cos(ego_infos[5] * np.pi / 180.), \
-                           ego_infos[4] + ego_lws * np.sin(ego_infos[5] * np.pi / 180.)
-        ego_rear_points = ego_infos[3] - ego_lws * np.cos(ego_infos[5] * np.pi / 180.), \
-                          ego_infos[4] - ego_lws * np.sin(ego_infos[5] * np.pi / 180.)
-
-        veh2veh_dist_index = 0
-        for veh_index in range(int(len(veh_infos) / self.per_veh_info_dim)):
-            vehs = veh_infos[veh_index * self.per_veh_info_dim:(veh_index + 1) * self.per_veh_info_dim]
-            veh_lws = (L - W) / 2.
-            veh_front_points = vehs[0] + veh_lws * np.cos(vehs[3] * np.pi / 180.), \
-                               vehs[1] + veh_lws * np.sin(vehs[3] * np.pi / 180.)
-            veh_rear_points = vehs[0] - veh_lws * np.cos(vehs[3] * np.pi / 180.), \
-                              vehs[1] - veh_lws * np.sin(vehs[3] * np.pi / 180.)
-            for ego_point in [ego_front_points, ego_rear_points]:
-                for veh_point in [veh_front_points, veh_rear_points]:
-                    veh2veh_dist = np.sqrt(np.square(ego_point[0] - veh_point[0]) + np.square(ego_point[1] - veh_point[1]))
-                    veh2veh4training += np.square(veh2veh_dist) if veh2veh_dist - 3.5 < 0 else 0
-                    veh2veh4real += np.square(veh2veh_dist) if veh2veh_dist - 2.5 < 0 else 0
-                    scale = self.barrier_lineup_loc / (np.log(self.barrier_lineup_loc) + 1.0)
-                    veh2veh_barrier_last = (1 - self.barrier_lambda) * scale * np.log1p(
-                        np.clip(self.veh2veh_dists_last[veh2veh_dist_index] - 2.5, 0.0, np.inf))
-                    barrier4training += np.where(veh2veh_dist - 2.5 - veh2veh_barrier_last < 0,
-                                                 np.exp(-veh2veh_dist + 2.5 + veh2veh_barrier_last),
-                                                 0.0)
-
-                    self.veh2veh_dists_last[veh2veh_dist_index] = veh2veh_dist
-
-        veh2road4training = 0.
-        veh2road4real = 0.
-        if self.training_task == 'left':
-            for ego_point in [ego_front_points, ego_rear_points]:
-                veh2road4training += np.where(logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, ego_point[0] < 1),
-                                              np.square(ego_point[0] - 1), 0.)
-                veh2road4training += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, LANE_WIDTH - ego_point[0] < 1),
-                    np.square(LANE_WIDTH - ego_point[0] - 1), 0.)
-                veh2road4training += np.where(
-                    logical_and(ego_point[0] < 0, LANE_WIDTH * LANE_NUMBER - ego_point[1] < 1),
-                    np.square(LANE_WIDTH * LANE_NUMBER - ego_point[1] - 1), 0.)
-                veh2road4training += np.where(logical_and(ego_point[0] < -CROSSROAD_SIZE / 2, ego_point[1] - 0 < 1),
-                                              np.square(ego_point[1] - 0 - 1), 0.)
-
-                veh2road4real += np.where(logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, ego_point[0] < 1),
-                                          np.square(ego_point[0] - 1), 0.)
-                veh2road4real += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, LANE_WIDTH - ego_point[0] < 1),
-                    np.square(LANE_WIDTH - ego_point[0] - 1), 0.)
-                veh2road4real += np.where(
-                    logical_and(ego_point[0] < -CROSSROAD_SIZE / 2, LANE_WIDTH * LANE_NUMBER - ego_point[1] < 1),
-                    np.square(LANE_WIDTH * LANE_NUMBER - ego_point[1] - 1), 0.)
-                veh2road4real += np.where(logical_and(ego_point[0] < -CROSSROAD_SIZE / 2, ego_point[1] - 0 < 1),
-                                          np.square(ego_point[1] - 0 - 1), 0.)
-        elif self.training_task == 'straight':
-            for ego_point in [ego_front_points, ego_rear_points]:
-                veh2road4training += np.where(logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, ego_point[0]-LANE_WIDTH < 1),
-                                              np.square(ego_point[0]-LANE_WIDTH - 1), 0.)
-                veh2road4training += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, 2 * LANE_WIDTH - ego_point[0] < 1),
-                    np.square(2 * LANE_WIDTH - ego_point[0] - 1), 0.)
-                veh2road4training += np.where(
-                    logical_and(ego_point[1] > CROSSROAD_SIZE / 2, LANE_WIDTH * LANE_NUMBER - ego_point[0] < 1),
-                    np.square(LANE_WIDTH * LANE_NUMBER - ego_point[0] - 1), 0.)
-                veh2road4training += np.where(logical_and(ego_point[1] > CROSSROAD_SIZE / 2, ego_point[0] - 0 < 1),
-                                              np.square(ego_point[0] - 0 - 1), 0.)
-
-                veh2road4real += np.where(logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, ego_point[0]-LANE_WIDTH < 1),
-                                          np.square(ego_point[0]-LANE_WIDTH - 1), 0.)
-                veh2road4real += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, 2 * LANE_WIDTH - ego_point[0] < 1),
-                    np.square(2 * LANE_WIDTH - ego_point[0] - 1), 0.)
-                veh2road4real += np.where(
-                    logical_and(ego_point[1] > CROSSROAD_SIZE / 2, LANE_WIDTH * LANE_NUMBER - ego_point[0] < 1),
-                    np.square(LANE_WIDTH * LANE_NUMBER - ego_point[0] - 1), 0.)
-                veh2road4real += np.where(logical_and(ego_point[1] > CROSSROAD_SIZE / 2, ego_point[0] - 0 < 1),
-                                          np.square(ego_point[0] - 0 - 1), 0.)
-        else:
-            assert self.training_task == 'right'
-            for ego_point in [ego_front_points, ego_rear_points]:
-                veh2road4training += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, ego_point[0] - 2 * LANE_WIDTH < 1),
-                    np.square(ego_point[0] - 2 * LANE_WIDTH - 1), 0.)
-                veh2road4training += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, LANE_NUMBER * LANE_WIDTH - ego_point[0] < 1),
-                    np.square(LANE_NUMBER * LANE_WIDTH - ego_point[0] - 1), 0.)
-                veh2road4training += np.where(logical_and(ego_point[0] > CROSSROAD_SIZE / 2, 0 - ego_point[1] < 1),
-                                              np.square(0 - ego_point[1] - 1), 0.)
-                veh2road4training += np.where(
-                    logical_and(ego_point[0] > CROSSROAD_SIZE / 2, ego_point[1] - (-LANE_WIDTH * LANE_NUMBER) < 1),
-                    np.square(ego_point[1] - (-LANE_WIDTH * LANE_NUMBER) - 1), 0.)
-
-                veh2road4real += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, ego_point[0] - 2 * LANE_WIDTH < 1),
-                    np.square(ego_point[0] - 2 * LANE_WIDTH - 1), 0.)
-                veh2road4real += np.where(
-                    logical_and(ego_point[1] < -CROSSROAD_SIZE / 2, LANE_NUMBER * LANE_WIDTH - ego_point[0] < 1),
-                    np.square(LANE_NUMBER * LANE_WIDTH - ego_point[0] - 1), 0.)
-                veh2road4real += np.where(logical_and(ego_point[0] > CROSSROAD_SIZE / 2, 0 - ego_point[1] < 1),
-                                          np.square(0 - ego_point[1] - 1), 0.)
-                veh2road4real += np.where(
-                    logical_and(ego_point[0] > CROSSROAD_SIZE / 2, ego_point[1] - (-LANE_WIDTH * LANE_NUMBER) < 1),
-                    np.square(ego_point[1] - (-LANE_WIDTH * LANE_NUMBER) - 1), 0.)
-
         reward = 0.05 * devi_v + 0.8 * devi_y + 30 * devi_phi + 0.02 * punish_yaw_rate + \
                  5 * punish_steer + 0.05 * punish_a_x
         reward = 0.01 * reward
@@ -673,14 +557,60 @@ class CrossroadEnd2end3way(gym.Env):
                            scaled_devi_v=0.05 * devi_v,
                            scaled_devi_y=0.8 * devi_y,
                            scaled_devi_phi=30 * devi_phi,
-                           veh2veh4training=veh2veh4training,
-                           veh2road4training=veh2road4training,
-                           veh2veh4real=veh2veh4real,
-                           veh2road4real=veh2road4real,
-                           barrier4training=barrier4training
                            )
 
         return reward, reward_dict
+
+    def compute_phi(self, obs):
+        obs = self.convert_vehs_to_abso(obs)
+        ego_lws = (L - W) / 2.
+        ego_infos, tracking_infos, veh_infos = obs[:self.ego_info_dim], obs[
+                                                                        self.ego_info_dim:self.ego_info_dim + self.per_tracking_info_dim * (
+                                                                                    self.num_future_data + 1)], \
+                                               obs[self.ego_info_dim + self.per_tracking_info_dim * (
+                                                           self.num_future_data + 1):]
+
+        ego_front_points = ego_infos[3] + ego_lws * np.cos(ego_infos[5] * np.pi / 180.), \
+                           ego_infos[4] + ego_lws * np.sin(ego_infos[5] * np.pi / 180.)
+        ego_rear_points = ego_infos[3] - ego_lws * np.cos(ego_infos[5] * np.pi / 180.), \
+                          ego_infos[4] - ego_lws * np.sin(ego_infos[5] * np.pi / 180.)
+
+        veh2veh_dist_list = []
+        veh2veh_dist_index = 0
+        for veh_index in range(int(len(veh_infos) / self.per_veh_info_dim)):
+            vehs = veh_infos[veh_index * self.per_veh_info_dim:(veh_index + 1) * self.per_veh_info_dim]
+            veh_lws = (L - W) / 2.
+            veh_front_points = vehs[0] + veh_lws * np.cos(vehs[3] * np.pi / 180.), \
+                               vehs[1] + veh_lws * np.sin(vehs[3] * np.pi / 180.)
+            veh_rear_points = vehs[0] - veh_lws * np.cos(vehs[3] * np.pi / 180.), \
+                              vehs[1] - veh_lws * np.sin(vehs[3] * np.pi / 180.)
+            for ego_point in [ego_front_points, ego_rear_points]:
+                for veh_point in [veh_front_points, veh_rear_points]:
+                    veh2veh_dist = np.sqrt(
+                        np.square(ego_point[0] - veh_point[0]) + np.square(ego_point[1] - veh_point[1]))
+                    veh2veh_dist_list.append(veh2veh_dist)
+
+        dotd_list = (np.array(veh2veh_dist) - np.array(self.veh2veh_dists_last)) / 0.1
+
+        sigma = 0.001
+
+        phi = sigma + 3.5**2 - np.square(np.array(veh2veh_dist)) - dotd_list
+
+        # self.veh2veh_dists_last = veh2veh_dist
+
+        return veh2veh_dist_list, np.max(phi)
+
+    def compute_delta_phi(self, obs_t, obs_tp1):
+        dist_list, phi_t = self.compute_phi(obs)
+        self.veh2veh_dists_last = dist_list
+        dist_list_tp1, phi_tp1 = self.compute_phi(obs_tp1)
+        if np.min(dist_list_tp1) < 2.5:
+            cost = 1.0
+        else:
+            cost = 0.0
+        delta_phi = phi_tp1 - np.clip(phi_t, 0, 100) if phi_tp1 >= 0 else 0
+        return delta_phi, cost
+
 
     def render(self, mode='human'):
         if mode == 'human':
